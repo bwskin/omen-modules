@@ -4696,6 +4696,37 @@ static void alc285_fixup_hp_mute_led(struct hda_codec *codec,
 	alc285_fixup_hp_coef_micmute_led(codec, fix, action);
 }
 
+static void alc245_fixup_hp_amp(struct hda_codec *codec,
+				const struct hda_fixup *fix, int action)
+{
+	int i, j;
+
+	static const unsigned short frames[][3][2] = {
+		{{0x400, 0x0}, {0x400, 0x0}, {0x400, 0x1}},
+		{{0x4c0, 0x1}, {0x400, 0x0}, {0x400, 0x14}},
+		{{0x4c6, 0x12}, {0x400, 0x0}, {0x400, 0x16}},
+		{{0x4c0, 0xf}, {0x400, 0x0}, {0x400, 0xf7}},
+		{{0x4c0, 0xa}, {0x400, 0x0}, {0x400, 0xd8}},
+		{{0x4c6, 0xb}, {0x400, 0x0}, {0x400, 0xff}},
+		{{0x4d1, 0x1}, {0x400, 0x0}, {0x400, 0x0}},
+		{{0x4c0, 0x9c}, {0x400, 0x0}, {0x400, 0x71}},
+		{{0x4c0, 0xb}, {0x400, 0x0}, {0x400, 0xbf}}
+	};
+
+	if (action != HDA_FIXUP_ACT_PRE_PROBE) return;
+
+	for (i = 0; i < 9; i++) {
+		snd_hda_codec_write(codec, 0x20, 0, 0x500, 0x26);
+		msleep(20);
+		for (j = 0; j < 3; j++) {
+			snd_hda_codec_write(codec, 0x20, 0, frames[i][j][0], frames[i][j][1]);
+			msleep(20);
+		}
+		snd_hda_codec_write(codec, 0x20, 0, 0x4b0, 0x23);
+		msleep(20);
+	}
+}
+
 static void alc285_fixup_hp_spectre_x360_mute_led(struct hda_codec *codec,
 				const struct hda_fixup *fix, int action)
 {
@@ -7158,6 +7189,7 @@ enum {
 	ALC285_FIXUP_ASUS_G533Z_PINS,
 	ALC285_FIXUP_HP_GPIO_LED,
 	ALC285_FIXUP_HP_MUTE_LED,
+	ALC245_FIXUP_HP_AMP,
 	ALC285_FIXUP_HP_SPECTRE_X360_MUTE_LED,
 	ALC236_FIXUP_HP_MUTE_LED_COEFBIT2,
 	ALC236_FIXUP_HP_GPIO_LED,
@@ -8646,6 +8678,12 @@ static const struct hda_fixup alc269_fixups[] = {
 		.type = HDA_FIXUP_FUNC,
 		.v.func = alc285_fixup_hp_mute_led,
 	},
+	[ALC245_FIXUP_HP_AMP] = {
+		.type = HDA_FIXUP_FUNC,
+		.v.func = alc245_fixup_hp_amp,
+		.chained = true,
+		.chain_id = ALC285_FIXUP_HP_MUTE_LED,
+	},
 	[ALC285_FIXUP_HP_SPECTRE_X360_MUTE_LED] = {
 		.type = HDA_FIXUP_FUNC,
 		.v.func = alc285_fixup_hp_spectre_x360_mute_led,
@@ -9557,6 +9595,7 @@ static const struct snd_pci_quirk alc269_fixup_tbl[] = {
 	SND_PCI_QUIRK(0x103c, 0x8898, "HP EliteBook 845 G8 Notebook PC", ALC285_FIXUP_HP_LIMIT_INT_MIC_BOOST),
 	SND_PCI_QUIRK(0x103c, 0x88d0, "HP Pavilion 15-eh1xxx (mainboard 88D0)", ALC287_FIXUP_HP_GPIO_LED),
 	SND_PCI_QUIRK(0x103c, 0x8902, "HP OMEN 16", ALC285_FIXUP_HP_MUTE_LED),
+	SND_PCI_QUIRK(0x103c, 0x8A42, "HP OMEN 16 (2022)", ALC245_FIXUP_HP_AMP),
 	SND_PCI_QUIRK(0x103c, 0x8919, "HP Pavilion Aero Laptop 13-be0xxx", ALC287_FIXUP_HP_GPIO_LED),
 	SND_PCI_QUIRK(0x103c, 0x896d, "HP ZBook Firefly 16 G9", ALC245_FIXUP_CS35L41_SPI_2_HP_GPIO_LED),
 	SND_PCI_QUIRK(0x103c, 0x896e, "HP EliteBook x360 830 G9", ALC245_FIXUP_CS35L41_SPI_2_HP_GPIO_LED),
