@@ -56,7 +56,7 @@ static const char * const omen_thermal_profile_boards[] = {
 	"874A", "8603", "8604", "8748", "886B", "886C", "878A", "878B", "878C",
 	"88C8", "88CB", "8786", "8787", "8788", "88D1", "88D2", "88F4", "88FD",
 	"88F5", "88F6", "88F7", "88FE", "88FF", "8900", "8901", "8902", "8912",
-	"8917", "8918", "8949", "894A", "89EB"
+	"8917", "8918", "8949", "894A", "89EB", "8A42"
 };
 
 /* DMI Board names of Omen laptops that are specifically set to be thermal
@@ -295,6 +295,12 @@ static inline int encode_outsize_for_pvsz(int outsize)
 	return 1;
 }
 
+
+static void omen_thermal_profile_refresh(struct work_struct *work);
+DECLARE_DELAYED_WORK(omen_profile_refresh, omen_thermal_profile_refresh);
+
+static int omen_saved_thermal_profile_value = -1;
+
 /*
  * hp_wmi_perform_query
  *
@@ -514,10 +520,61 @@ static int omen_thermal_profile_get(void)
 	return data;
 }
 
+static void omen_thermal_profile_refresh(struct work_struct *work) {
+	int tp, err;
+
+	tp = omen_thermal_profile_get();
+	if (tp < 0) {
+		pr_warn("omen-refresh: Failed to get thermal profile, refreshing disabled [code: 0x%x]\n", tp);
+		return;
+	}
+	err = omen_thermal_profile_set(tp);
+	if (err < 0) {
+		pr_warn("omen-refresh: Failed to set thermal profile to 0x%x, refreshing disabled [code: 0x%x]\n", tp, err);
+		return;
+	}
+
+	// Run every 100 seconds
+	schedule_delayed_work(&omen_profile_refresh, 100 * HZ);
+}
+
+static void omen_setup_profile_refresh(void) {
+	schedule_delayed_work(&omen_profile_refresh, 0);
+}
+
+
+static int omen_save_thermal_profile(void) {
+	int tp;
+	tp = omen_thermal_profile_get();
+	if (tp < 0) {
+		return tp;
+	}
+	omen_saved_thermal_profile_value = tp;
+	return tp;
+}
+
+static int omen_restore_thermal_profile(void) {
+	int err, tp;
+
+	if (omen_saved_thermal_profile_value < 0) {
+		pr_info("omen-pm: no saved thermal profile, restore skipped");
+		return 0;
+	}
+
+	tp = omen_saved_thermal_profile_value;
+	omen_saved_thermal_profile_value = -1;
+
+	err = omen_thermal_profile_set(tp);
+
+	if (err < 0) {
+		return err;
+	}
+	return tp;
+}
+
 static int hp_wmi_fan_speed_max_set(int enabled)
 {
 	int ret;
-
 	ret = hp_wmi_perform_query(HPWMI_FAN_SPEED_MAX_SET_QUERY, HPWMI_GM,
 				   &enabled, sizeof(enabled), 0);
 
@@ -789,6 +846,9 @@ static int camera_shutter_input_setup(void)
 static ssize_t zone_colors_show(struct device *dev,
 				    struct device_attribute *attr, char *buf)
 {
+
+
+
 	u8 val[128];
 
 	int ret = hp_wmi_perform_query(HPWMI_HDDTEMP_QUERY, HPWMI_KB, &val,
@@ -798,6 +858,8 @@ static ssize_t zone_colors_show(struct device *dev,
 		return ret;
 
 	memcpy(buf, &val[OMEN_ZONE_COLOR_OFFSET], OMEN_ZONE_COLOR_LEN);
+
+	pr_info("READ COLOR");
 
 	return OMEN_ZONE_COLOR_LEN;
 }
@@ -1451,10 +1513,19 @@ static int thermal_profile_setup(void)
 		if (err < 0)
 			return err;
 
+		// Set default profile to 0x30 - Balanced
+		err = omen_thermal_profile_set(0x30);
+		if (err < 0)
+			return err;
+
 		platform_profile_handler.profile_get = platform_profile_omen_get;
 		platform_profile_handler.profile_set = platform_profile_omen_set;
 
-		set_bit(PLATFORM_PROFILE_COOL, platform_profile_handler.choices);
+		// Disable cool profile
+		/* set_bit(PLATFORM_PROFILE_COOL, platform_profile_handler.choices); */
+
+		omen_setup_profile_refresh();
+
 	} else if (is_victus_thermal_profile()) {
 		tp = omen_thermal_profile_get();
 		if (tp < 0)
@@ -1624,6 +1695,17 @@ static int __exit hp_wmi_bios_remove(struct platform_device *device)
 
 static int hp_wmi_resume_handler(struct device *device)
 {
+	int tp;
+
+	tp = omen_restore_thermal_profile();
+	if (tp < 0) {
+		pr_info("omen-tp: Failed to restore thermal profile value: code 0x%x\n", tp);
+		pr_info("omen-tp: Using default profile value: 0x30");
+		tp = 0x30;
+	}
+
+	pr_info("omen-tp: Restored thermal profile: 0x%x", tp);
+
 	/*
 	 * Hardware state may have changed while suspended, so trigger
 	 * input events for the current state. As this is a switch,
@@ -1659,9 +1741,21 @@ static int hp_wmi_resume_handler(struct device *device)
 	return 0;
 }
 
+static int hp_wmi_suspend_handler(struct device *device) {
+	int tp;
+	tp = omen_save_thermal_profile();
+	if (tp < 0) pr_info("omen-tp: Failed to save thermal profile value: code 0x%x", tp);
+
+	pr_info("omen-tp: Saved thermal profile: 0x%x", tp);
+
+	return 0;
+}
+
 static const struct dev_pm_ops hp_wmi_pm_ops = {
 	.resume  = hp_wmi_resume_handler,
 	.restore  = hp_wmi_resume_handler,
+	.suspend = hp_wmi_suspend_handler,
+	.freeze = hp_wmi_suspend_handler
 };
 
 static struct platform_driver hp_wmi_driver = {
@@ -1737,6 +1831,16 @@ static int hp_wmi_hwmon_write(struct device *dev, enum hwmon_sensor_types type,
 		case 2:
 			/* 2 is automatic speed control, which is 0 for us */
 			return hp_wmi_fan_speed_max_set(0);
+		case 3:
+			int ret;
+			int value = 0x2828;
+			ret = hp_wmi_perform_query(0x2E, HPWMI_GM,
+					&value, sizeof(value), 0);
+			if (ret)
+				return ret < 0 ? ret : -EINVAL;
+
+			return value;
+
 		default:
 			/* we don't support manual fan speed control */
 			return -EINVAL;
