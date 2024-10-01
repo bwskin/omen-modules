@@ -4717,13 +4717,15 @@ static void alc245_fixup_hp_amp(struct hda_codec *codec,
 
 	for (i = 0; i < 9; i++) {
 		snd_hda_codec_write(codec, 0x20, 0, 0x500, 0x26);
-		msleep(50);
 		for (j = 0; j < 3; j++) {
 			snd_hda_codec_write(codec, 0x20, 0, frames[i][j][0], frames[i][j][1]);
-			msleep(50);
 		}
 		snd_hda_codec_write(codec, 0x20, 0, 0x4b0, 0x23);
-		msleep(50);
+		snd_hda_codec_write(codec, 0x20, 0, 0x500, 0x26);
+		for (j = 0; j < 3; j++) {
+			snd_hda_codec_write(codec, 0x20, 0, frames[i][j][0], frames[i][j][1]);
+		}
+		snd_hda_codec_write(codec, 0x20, 0, 0x4b0, 0x23);
 	}
 }
 
