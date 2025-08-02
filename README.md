@@ -6,7 +6,7 @@ This repo contains linux kernel modules that fixes some issues with this model.
 
 ## How to install
 ```bash
-git clone https://git.rustylab.net/public/omen-modules.git
+git clone https://git.rustylab.net/Naoto/omen-modules.git
 cd omen-modules/<module-name>
 sudo dkms install .
 ```
